@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { isNonEmptyString } from '@sniptt/guards';
 import chunk from 'lodash.chunk';
+import { isEmail } from 'class-validator';
 import { QUERY_MAX_RECORDS } from 'twenty-shared/constants';
 import { isDefined } from 'twenty-shared/utils';
 import { In } from 'typeorm';
@@ -47,31 +48,20 @@ export class MessagingMessageParticipantService {
             },
           });
 
-        const suppliesIdentity = (participant: ParticipantWithMessageId) =>
-          isDefined(participant.personId) ||
-          isDefined(participant.workspaceMemberId);
+        const normalizeHandle = (handle: string | null) =>
+          isNonEmptyString(handle) && isEmail(handle.replace(/\s/g, ''))
+            ? handle.replace(/\s/g, '').toLowerCase()
+            : handle;
 
-        // A caller that states who a participant is owns that row, so it is
-        // matched on what cannot drift between deliveries: the message, the
-        // handle and the role. Keying on displayName as well would make a
-        // provider that renames someone — or simply omits the name on a later
-        // delivery — insert a rival row instead, leaving the original behind
-        // with its stale person link and the thread attached to both records.
-        //
-        // Callers that supply no identity keep the exact match, so the email
-        // path, where the matcher fills these in afterwards, is unchanged.
         const findExisting = (participant: ParticipantWithMessageId) =>
           existingParticipantsBasedOnMessageIds.find(
             (existingParticipant) =>
               existingParticipant.messageId === participant.messageId &&
-              existingParticipant.handle === participant.handle &&
-              existingParticipant.role === participant.role &&
-              (suppliesIdentity(participant) ||
-                existingParticipant.displayName === participant.displayName),
+              normalizeHandle(existingParticipant.handle) ===
+                normalizeHandle(participant.handle) &&
+              existingParticipant.role === participant.role,
           );
 
-        // Paired once: the lookup is a scan of every existing row, and both
-        // the insert list and the update list below need the same answer.
         const participantsWithExisting = participants.map((participant) => ({
           participant,
           existingParticipant: findExisting(participant),
@@ -98,17 +88,9 @@ export class MessagingMessageParticipantService {
             };
           });
 
-        // A re-ingested participant whose caller now knows the person it
-        // belongs to would otherwise keep its original, unlinked row forever.
-        // Only callers that supply an identity can trigger this, so the email
-        // path — which leaves both undefined and relies on the matcher — is
-        // untouched.
         const identityUpdates = participantsWithExisting.flatMap(
           ({ participant, existingParticipant }) => {
-            if (
-              !isDefined(existingParticipant) ||
-              !suppliesIdentity(participant)
-            ) {
+            if (!isDefined(existingParticipant)) {
               return [];
             }
 
@@ -117,16 +99,12 @@ export class MessagingMessageParticipantService {
             const workspaceMemberId =
               participant.workspaceMemberId ??
               existingParticipant.workspaceMemberId;
-            // Carried along because the row is no longer matched on it: without
-            // this a rename would be silently dropped on every later delivery.
-            // An omitted name arrives as an empty string though, and this is
-            // the only branch that writes the column back, so taking that
-            // literally would erase whatever an earlier delivery supplied — a
-            // caller adding a person link should not have to resend the rest
-            // of the row to keep it.
-            const displayName = isNonEmptyString(participant.displayName)
-              ? participant.displayName
-              : existingParticipant.displayName;
+            const displayName =
+              isNonEmptyString(participant.displayName) &&
+              (participant.displayName !== participant.handle ||
+                !isNonEmptyString(existingParticipant.displayName))
+                ? participant.displayName
+                : existingParticipant.displayName;
 
             if (
               personId === existingParticipant.personId &&
@@ -160,7 +138,9 @@ export class MessagingMessageParticipantService {
 
         const touchedIds = [
           ...identifiers.map(({ id }) => id),
-          ...identityUpdates.map(({ criteria }) => criteria),
+          ...participantsWithExisting
+            .map(({ existingParticipant }) => existingParticipant?.id)
+            .filter(isDefined),
         ];
 
         return messageParticipantRepository.find({

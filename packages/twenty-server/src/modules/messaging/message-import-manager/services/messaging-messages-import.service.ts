@@ -210,6 +210,11 @@ export class MessagingMessagesImportService {
             );
           }
 
+          await this.cacheStorage.setRemove(
+            `messages-to-reconcile:${workspaceId}:${messageChannel.id}`,
+            messageIdsToFetch,
+          );
+
           if (messageIdsToFetch.length < messagesGetBatchSize) {
             await this.messageChannelSyncStatusService.markAsMessageSyncCompleted(
               [messageChannel.id],

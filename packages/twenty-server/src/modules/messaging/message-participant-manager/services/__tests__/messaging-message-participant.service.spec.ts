@@ -254,20 +254,63 @@ describe('MessagingMessageParticipantService', () => {
     ]);
   });
 
-  // Email relies on the exact match: the matcher, not the caller, sets the
-  // identity, so a renamed sender is a different participant row as before.
-  it('still inserts a new row when a caller with no identity renames a sender', async () => {
+  it('updates an email name without inserting another participant', async () => {
     givenAnExistingParticipant(null);
 
     await service.saveMessageParticipants(
-      [{ ...anEmailParticipant(), displayName: 'Ada L.' }],
+      [
+        {
+          ...anEmailParticipant(),
+          handle: ' ADA@Example.com ',
+          displayName: 'Ada L.',
+        },
+      ],
+      WORKSPACE_ID,
+      transactionScope,
+    );
+
+    expect(participantRepository.insert).toHaveBeenCalledWith([]);
+    expect(participantRepository.updateMany).toHaveBeenCalledWith([
+      expect.objectContaining({
+        partialEntity: expect.objectContaining({
+          displayName: 'Ada L.',
+          personId: null,
+        }),
+      }),
+    ]);
+  });
+
+  it('preserves case-sensitive nonemail handles containing @', async () => {
+    participantRepository.find.mockResolvedValueOnce([
+      {
+        ...anEmailParticipant(),
+        id: PARTICIPANT_ID,
+        handle: '@CaseSensitiveUser',
+      },
+    ]);
+
+    await service.saveMessageParticipants(
+      [{ ...anEmailParticipant(), handle: '@casesensitiveuser' }],
       WORKSPACE_ID,
       transactionScope,
     );
 
     expect(participantRepository.insert).toHaveBeenCalledWith([
-      expect.objectContaining({ displayName: 'Ada L.', personId: null }),
+      expect.objectContaining({ handle: '@casesensitiveuser' }),
     ]);
+    expect(participantRepository.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps a provider name when a late native save supplies an email placeholder', async () => {
+    givenAnExistingParticipant(null);
+
+    await service.saveMessageParticipants(
+      [{ ...anEmailParticipant(), displayName: 'ada@example.com' }],
+      WORKSPACE_ID,
+      transactionScope,
+    );
+
+    expect(participantRepository.insert).toHaveBeenCalledWith([]);
     expect(participantRepository.updateMany).not.toHaveBeenCalled();
   });
 

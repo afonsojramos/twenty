@@ -61,6 +61,11 @@ export class MessagingMessageService {
 
     return this.workspaceOrmManager.executeInWorkspaceContext(
       async () => {
+        await transactionScope.executeRawQuery(
+          'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+          [`messaging:${workspaceId}:${messageChannelId}`],
+        );
+
         const messageChannelMessageAssociationRepository =
           transactionScope.getRepository<MessageChannelMessageAssociationWorkspaceEntity>(
             'messageChannelMessageAssociation',
@@ -101,16 +106,28 @@ export class MessagingMessageService {
 
         const existingMessageChannelMessageAssociations =
           await messageChannelMessageAssociationRepository.find({
-            where: {
-              messageId: In(existingMessagesInDB.map((message) => message.id)),
-              messageChannelId,
-            },
+            where: [
+              {
+                messageId: In(
+                  existingMessagesInDB.map((message) => message.id),
+                ),
+                messageChannelId,
+              },
+              {
+                messageExternalId: In(
+                  messages.map((message) => message.externalId),
+                ),
+                messageChannelId,
+              },
+            ],
+            relations: { message: true },
           });
 
         await this.enrichMessageAccumulatorWithExistingMessages(
           messages,
           messageAccumulatorMap,
           existingMessagesInDB,
+          existingMessageChannelMessageAssociations,
         );
 
         await this.enrichMessageAccumulatorWithExistingMessageThreadIds(
@@ -177,6 +194,20 @@ export class MessagingMessageService {
             messageAccumulator.messageToCreate = messageToCreate;
           } else {
             newOrExistingMessageId = messageAccumulator.existingMessageInDB.id;
+
+            if (
+              message.headerMessageId !==
+                messageAccumulator.existingMessageInDB.headerMessageId &&
+              message.messageHeaders?.some(
+                (header) =>
+                  header.name.toLowerCase() === 'message-id' &&
+                  header.value === message.headerMessageId,
+              )
+            ) {
+              await messageRepository.update(newOrExistingMessageId, {
+                headerMessageId: message.headerMessageId,
+              });
+            }
           }
 
           if (
@@ -336,12 +367,17 @@ export class MessagingMessageService {
     messages: MessageWithParticipants[],
     messageAccumulatorMap: Map<string, MessageAccumulator>,
     existingMessagesInDB: MessageWorkspaceEntity[],
+    existingMessageChannelMessageAssociations: MessageChannelMessageAssociationWorkspaceEntity[],
   ) {
     for (const message of messages) {
-      const existingMessage = existingMessagesInDB.find(
-        (existingMessage) =>
-          existingMessage.headerMessageId === message.headerMessageId,
-      );
+      const existingMessage =
+        existingMessageChannelMessageAssociations.find(
+          (association) => association.messageExternalId === message.externalId,
+        )?.message ??
+        existingMessagesInDB.find(
+          (existingMessage) =>
+            existingMessage.headerMessageId === message.headerMessageId,
+        );
 
       if (!isDefined(existingMessage)) {
         messageAccumulatorMap.set(message.externalId, {});

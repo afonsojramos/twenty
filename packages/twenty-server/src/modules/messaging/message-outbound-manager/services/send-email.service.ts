@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+import { isNonEmptyString } from '@sniptt/guards';
+
 import { type ComposedEmail } from 'src/engine/core-modules/tool/tools/email-tool/types/composed-email.type';
 import { MessagingDraftSendService } from 'src/modules/messaging/message-outbound-manager/services/messaging-draft-send.service';
 import { MessagingMessageOutboundService } from 'src/modules/messaging/message-outbound-manager/services/messaging-message-outbound.service';
@@ -7,6 +9,7 @@ import { SentMessagePersistenceService } from 'src/modules/messaging/message-out
 import { type PersistedSentMessage } from 'src/modules/messaging/message-outbound-manager/types/persisted-sent-message.type';
 import { type SendMessageInput } from 'src/modules/messaging/message-outbound-manager/types/send-message-input.type';
 import { type SendMessageResult } from 'src/modules/messaging/message-outbound-manager/types/send-message-result.type';
+import { getConnectedAccountSendableHandleOrThrow } from 'src/modules/messaging/message-outbound-manager/utils/get-connected-account-sendable-handle-or-throw.util';
 
 @Injectable()
 export class SendEmailService {
@@ -88,6 +91,12 @@ export class SendEmailService {
         body: data.plainTextBody,
         recipients: sendResult.deliveredRecipients ?? data.recipients,
         connectedAccount: data.connectedAccount,
+        fromHandle: isNonEmptyString(data.fromHandle)
+          ? getConnectedAccountSendableHandleOrThrow({
+              connectedAccount: data.connectedAccount,
+              requestedFromHandle: data.fromHandle,
+            })
+          : data.connectedAccount.handle,
         messageChannelId: data.messageChannelId!,
         inReplyTo: data.inReplyTo,
         parentThreadExternalId: data.threadExternalId,
