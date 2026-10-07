@@ -125,11 +125,26 @@ export class MessagingMessageListFetchService {
             `messages-to-import:${workspaceId}:${freshMessageChannel.id}`,
           );
 
-          const messageExternalIds = [
-            ...messageLists.flatMap(
-              (messageList) => messageList.messageExternalIds,
+          const messageExternalIdsToReconcile = new Set(
+            await this.cacheStorage.setMembers(
+              `messages-to-reconcile:${workspaceId}:${freshMessageChannel.id}`,
             ),
-            ...(processedfolderActionsResult?.messageExternalIdsToImport ?? []),
+          );
+
+          const listedMessageExternalIds = [
+            ...new Set([
+              ...messageLists.flatMap(
+                (messageList) => messageList.messageExternalIds,
+              ),
+              ...(processedfolderActionsResult?.messageExternalIdsToImport ??
+                []),
+            ]),
+          ];
+          const messageExternalIds = [
+            ...new Set([
+              ...listedMessageExternalIds,
+              ...messageExternalIdsToReconcile,
+            ]),
           ];
 
           const messageExternalIdsToDelete = messageLists.flatMap(
@@ -176,6 +191,7 @@ export class MessagingMessageListFetchService {
 
             const messageExternalIdsToImport = messageExternalIdsChunk.filter(
               (messageExternalId) =>
+                messageExternalIdsToReconcile.has(messageExternalId) ||
                 !existingMessageChannelMessageAssociationsExternalIds.includes(
                   messageExternalId,
                 ),
@@ -210,13 +226,13 @@ export class MessagingMessageListFetchService {
           const fullSyncMessageChannelMessageAssociationsToDelete = isFullSync
             ? await this.computeFullSyncMessageChannelMessageAssociationsToDelete(
                 freshMessageChannel,
-                messageExternalIds,
+                listedMessageExternalIds,
               )
             : [];
 
           const allMessageExternalIdsToDelete =
             filterMessageExternalIdsToDelete({
-              messageExternalIds,
+              messageExternalIds: listedMessageExternalIds,
               messageExternalIdsToDelete: [
                 ...messageExternalIdsToDelete,
                 ...fullSyncMessageChannelMessageAssociationsToDelete.map(
@@ -246,6 +262,17 @@ export class MessagingMessageListFetchService {
                 },
               );
             }
+            await this.cacheStorage.setRemove(
+              `messages-to-import:${workspaceId}:${freshMessageChannel.id}`,
+              allMessageExternalIdsToDelete,
+            );
+            await this.cacheStorage.setRemove(
+              `messages-to-reconcile:${workspaceId}:${freshMessageChannel.id}`,
+              allMessageExternalIdsToDelete,
+            );
+            totalMessagesToImportCount = await this.cacheStorage.getSetLength(
+              `messages-to-import:${workspaceId}:${freshMessageChannel.id}`,
+            );
           }
 
           this.logger.log(

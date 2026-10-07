@@ -3,7 +3,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 
 import { isDefined } from 'twenty-shared/utils';
 import { Repository } from 'typeorm';
+import { ConnectedAccountProvider } from 'twenty-shared/types';
 
+import { InjectCacheStorage } from 'src/engine/core-modules/cache-storage/decorators/cache-storage.decorator';
+import { CacheStorageService } from 'src/engine/core-modules/cache-storage/services/cache-storage.service';
+import { CacheStorageNamespace } from 'src/engine/core-modules/cache-storage/types/cache-storage-namespace.enum';
 import { MessageChannelEntity } from 'src/engine/metadata-modules/message-channel/entities/message-channel.entity';
 import { MessagingSaveMessagesAndEnqueueContactCreationService } from 'src/modules/messaging/message-import-manager/services/messaging-save-messages-and-enqueue-contact-creation.service';
 import { type PersistSentMessageInput } from 'src/modules/messaging/message-outbound-manager/types/persist-sent-message-input.type';
@@ -13,6 +17,8 @@ import { formatSentMessage } from 'src/modules/messaging/message-outbound-manage
 @Injectable()
 export class SentMessagePersistenceService {
   constructor(
+    @InjectCacheStorage(CacheStorageNamespace.ModuleMessaging)
+    private readonly cacheStorage: CacheStorageService,
     @InjectRepository(MessageChannelEntity)
     private readonly messageChannelRepository: Repository<MessageChannelEntity>,
     private readonly saveMessagesAndEnqueueContactCreationService: MessagingSaveMessagesAndEnqueueContactCreationService,
@@ -28,6 +34,18 @@ export class SentMessagePersistenceService {
       },
       relations: { connectedAccount: true },
     });
+
+    if (
+      messageChannel.connectedAccount.provider ===
+        ConnectedAccountProvider.GOOGLE &&
+      isDefined(input.sendResult.messageExternalId)
+    ) {
+      await this.cacheStorage.setAdd(
+        `messages-to-reconcile:${input.workspaceId}:${messageChannel.id}`,
+        [input.sendResult.messageExternalId],
+        7 * 24 * 60 * 60 * 1000,
+      );
+    }
 
     const messageToSave = formatSentMessage(input);
 

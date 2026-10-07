@@ -45,6 +45,12 @@ export const gmailMailboxHandlers = (
       historyId: inbox[0]?.historyId ?? '987654321',
     }),
   ),
+  http.get('*/gmail/v1/users/me/threads/:threadId', ({ params }) =>
+    HttpResponse.json<gmail_v1.Schema$Thread>({
+      id: String(params.threadId),
+      messages: inbox.filter((message) => message.threadId === params.threadId),
+    }),
+  ),
   http.get('*/gmail/v1/users/me/messages/:messageId', ({ params }) => {
     const message = inbox.find(
       (candidate) => candidate.id === params.messageId,
