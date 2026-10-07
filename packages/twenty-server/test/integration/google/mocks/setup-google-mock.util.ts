@@ -1,5 +1,5 @@
 import { type calendar_v3, type gmail_v1 } from 'googleapis';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 
 import { gmailHistoryHandler } from 'test/integration/google/mocks/gmail-history-handler.util';
 import { gmailMailboxHandlers } from 'test/integration/google/mocks/gmail-mailbox-handlers.util';
@@ -29,7 +29,12 @@ export type GoogleMock = {
   createdCalendarEvents: calendar_v3.Schema$Event[];
   actAsAccount: (handle: string) => void;
   serveMessageList: (messages: gmail_v1.Schema$Message[]) => void;
-  serveHistory: (addedMessages: gmail_v1.Schema$Message[]) => void;
+  serveMailbox: (messages: gmail_v1.Schema$Message[]) => void;
+  stallMessageMetadata: () => void;
+  serveHistory: (
+    addedMessages: gmail_v1.Schema$Message[],
+    deletedMessages?: gmail_v1.Schema$Message[],
+  ) => void;
   serveCalendarEvents: (
     events: calendar_v3.Schema$Event[],
     options?: { nextSyncToken?: string },
@@ -149,8 +154,10 @@ export const setupGoogleMock = ({
       httpMock.use(...googleIdentityHandlers(accountHandle)),
     serveMessageList: (messages) =>
       httpMock.use(gmailMessageListHandler(messages)),
-    serveHistory: (addedMessages) =>
-      httpMock.use(gmailHistoryHandler(addedMessages)),
+    serveMailbox: (messages) =>
+      httpMock.use(...gmailMailboxHandlers(messages, labelStore)),
+    serveHistory: (addedMessages, deletedMessages) =>
+      httpMock.use(gmailHistoryHandler(addedMessages, deletedMessages)),
     serveCalendarEvents: (
       events,
       { nextSyncToken = 'mock-calendar-sync-token' } = {},
@@ -198,6 +205,23 @@ export const setupGoogleMock = ({
     // A channel carrying a sync cursor fetches through the history endpoint
     // rather than the message list, so both have to fail for the failure to
     // surface regardless of which path the channel takes.
+    stallMessageMetadata: () =>
+      httpMock.use(
+        http.get(
+          '*/gmail/v1/users/me/messages/:id',
+          async ({ request }) => {
+            if (
+              new URL(request.url).searchParams.get('format') !== 'metadata'
+            ) {
+              return;
+            }
+            await delay(10000);
+
+            return HttpResponse.json({});
+          },
+          { once: true },
+        ),
+      ),
     failMessageList: (failure) =>
       httpMock.use(
         http.get('*/gmail/v1/users/me/messages', () =>

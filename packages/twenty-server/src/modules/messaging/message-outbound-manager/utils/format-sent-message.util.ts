@@ -12,7 +12,9 @@ import { resolveOutboundThreadExternalId } from 'src/modules/messaging/message-o
 export const formatSentMessage = (
   input: PersistSentMessageInput,
 ): MessageWithParticipants => {
-  const senderHandle = input.connectedAccount.handle ?? '';
+  const senderHandle = isNonEmptyString(input.fromHandle)
+    ? input.fromHandle
+    : (input.connectedAccount.handle ?? '');
 
   const participants: MessageParticipant[] = [
     {

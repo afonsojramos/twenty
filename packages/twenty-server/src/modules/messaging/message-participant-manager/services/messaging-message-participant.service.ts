@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { isNonEmptyString } from '@sniptt/guards';
 import chunk from 'lodash.chunk';
+import { isEmail } from 'class-validator';
 import { QUERY_MAX_RECORDS } from 'twenty-shared/constants';
 import { isDefined } from 'twenty-shared/utils';
 import { In } from 'typeorm';
@@ -47,22 +48,20 @@ export class MessagingMessageParticipantService {
             },
           });
 
-        const suppliesIdentity = (participant: ParticipantWithMessageId) =>
-          isDefined(participant.personId) ||
-          isDefined(participant.workspaceMemberId);
+        const normalizeHandle = (handle: string | null) =>
+          isNonEmptyString(handle) && isEmail(handle.replace(/\s/g, ''))
+            ? handle.replace(/\s/g, '').toLowerCase()
+            : handle;
 
-        // Caller-identified rows match on message, handle and role only: displayName can drift between deliveries
         const findExisting = (participant: ParticipantWithMessageId) =>
           existingParticipantsBasedOnMessageIds.find(
             (existingParticipant) =>
               existingParticipant.messageId === participant.messageId &&
-              existingParticipant.handle === participant.handle &&
-              existingParticipant.role === participant.role &&
-              (suppliesIdentity(participant) ||
-                existingParticipant.displayName === participant.displayName),
+              normalizeHandle(existingParticipant.handle) ===
+                normalizeHandle(participant.handle) &&
+              existingParticipant.role === participant.role,
           );
 
-        // Paired once: the lookup scans every existing row
         const participantsWithExisting = participants.map((participant) => ({
           participant,
           existingParticipant: findExisting(participant),
@@ -89,13 +88,9 @@ export class MessagingMessageParticipantService {
             };
           });
 
-        // Without this a re-ingested participant would keep its original unlinked row forever
         const identityUpdates = participantsWithExisting.flatMap(
           ({ participant, existingParticipant }) => {
-            if (
-              !isDefined(existingParticipant) ||
-              !suppliesIdentity(participant)
-            ) {
+            if (!isDefined(existingParticipant)) {
               return [];
             }
 
@@ -104,10 +99,12 @@ export class MessagingMessageParticipantService {
             const workspaceMemberId =
               participant.workspaceMemberId ??
               existingParticipant.workspaceMemberId;
-            // An omitted name arrives as '', which must not erase one an earlier delivery supplied
-            const displayName = isNonEmptyString(participant.displayName)
-              ? participant.displayName
-              : existingParticipant.displayName;
+            const displayName =
+              isNonEmptyString(participant.displayName) &&
+              (participant.displayName !== participant.handle ||
+                !isNonEmptyString(existingParticipant.displayName))
+                ? participant.displayName
+                : existingParticipant.displayName;
 
             if (
               personId === existingParticipant.personId &&
@@ -139,7 +136,9 @@ export class MessagingMessageParticipantService {
 
         const touchedIds = [
           ...identifiers.map(({ id }) => id),
-          ...identityUpdates.map(({ criteria }) => criteria),
+          ...participantsWithExisting
+            .map(({ existingParticipant }) => existingParticipant?.id)
+            .filter(isDefined),
         ];
 
         return messageParticipantRepository.find({

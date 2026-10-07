@@ -1,6 +1,5 @@
 import { MessageParticipantRole } from 'twenty-shared/types';
 
-import { type ConnectedAccountEntity } from 'src/engine/metadata-modules/connected-account/entities/connected-account.entity';
 import { MessageDirection } from 'src/modules/messaging/common/enums/message-direction.enum';
 import { type PersistSentMessageInput } from 'src/modules/messaging/message-outbound-manager/types/persist-sent-message-input.type';
 import { formatSentMessage } from 'src/modules/messaging/message-outbound-manager/utils/format-sent-message.util';
@@ -17,14 +16,33 @@ const buildInput = (
   body: 'See attached.',
   recipients: { to: [], cc: [], bcc: [] },
   connectedAccount: {
+    id: 'account-1',
     handle: 'sender@example.com',
-  } as ConnectedAccountEntity,
+  },
   messageChannelId: 'channel-1',
   workspaceId: 'workspace-1',
   ...overrides,
 });
 
 describe('formatSentMessage', () => {
+  it('uses the selected sender alias for the FROM participant', () => {
+    const message = formatSentMessage(
+      buildInput({ fromHandle: 'alias@example.com' }),
+    );
+
+    expect(
+      message.participants.filter(
+        ({ role }) => role === MessageParticipantRole.FROM,
+      ),
+    ).toEqual([
+      {
+        role: MessageParticipantRole.FROM,
+        handle: 'alias@example.com',
+        displayName: 'alias@example.com',
+      },
+    ]);
+  });
+
   it('should mark the message as OUTGOING with the sender as FROM participant', () => {
     const message = formatSentMessage(buildInput());
 

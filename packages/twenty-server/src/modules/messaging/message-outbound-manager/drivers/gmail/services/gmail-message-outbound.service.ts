@@ -41,8 +41,35 @@ export class GmailMessageOutboundService implements MessageOutboundDriver {
       },
     });
 
+    let headerMessageId = extractMessageIdFromBuffer(messageBuffer);
+
+    if (isNonEmptyString(data.id)) {
+      try {
+        const { data: sentMessage } = await gmailClient.users.messages.get(
+          {
+            userId: 'me',
+            id: data.id,
+            format: 'metadata',
+            metadataHeaders: ['Message-ID'],
+          },
+          { timeout: 5000, retry: false },
+        );
+        const providerMessageId = sentMessage.payload?.headers?.find(
+          (header) => header.name?.toLowerCase() === 'message-id',
+        )?.value;
+
+        if (isNonEmptyString(providerMessageId)) {
+          headerMessageId = providerMessageId;
+        }
+      } catch {
+        this.logger.warn(
+          `Could not read Gmail Message-ID after sending message ${data.id}; mailbox sync will reconcile by provider ID`,
+        );
+      }
+    }
+
     return {
-      headerMessageId: extractMessageIdFromBuffer(messageBuffer),
+      headerMessageId,
       messageExternalId: data.id ?? undefined,
       threadExternalId: data.threadId ?? undefined,
     };

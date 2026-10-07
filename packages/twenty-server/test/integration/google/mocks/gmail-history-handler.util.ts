@@ -5,12 +5,16 @@ import { type MswHandler } from 'test/integration/utils/http-mock.util';
 
 export const gmailHistoryHandler = (
   addedMessages: gmail_v1.Schema$Message[],
+  deletedMessages: gmail_v1.Schema$Message[] = [],
 ): MswHandler =>
   http.get('*/gmail/v1/users/me/history', () =>
     HttpResponse.json<gmail_v1.Schema$ListHistoryResponse>({
       history: [
         {
           messagesAdded: addedMessages.map((message) => ({
+            message: { id: message.id, threadId: message.threadId },
+          })),
+          messagesDeleted: deletedMessages.map((message) => ({
             message: { id: message.id, threadId: message.threadId },
           })),
         },

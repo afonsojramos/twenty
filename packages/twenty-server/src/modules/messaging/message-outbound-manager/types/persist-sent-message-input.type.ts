@@ -7,6 +7,7 @@ export type PersistSentMessageInput = {
   body: string;
   recipients: { to: string[]; cc: string[]; bcc: string[] };
   connectedAccount: Pick<ConnectedAccountEntity, 'id' | 'handle'>;
+  fromHandle?: string;
   messageChannelId: string;
   inReplyTo?: string;
   parentThreadExternalId?: string;
